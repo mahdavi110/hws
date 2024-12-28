@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tehran Stock History</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-size: 14px;
+            line-height: 1.4;
+            height: 100vh;
+            overflow: hidden;
+            /* Prevent body scrolling */
+        }
+
+        .container {
+            width: 100%;
+            height: 100vh;
+            padding: 10px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            /* Enable scrolling within the container */
+        }
+
+        .combined-chart-wrapper,
+        .chart-wrapper {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            /* Full viewport height */
+        }
+
+        .checkbox-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .checkbox-item input {
+            margin-right: 5px;
+        }
+
+        .chart-area {
+            flex: 1;
+            position: relative;
+            height: calc(100vh - 150px);
+            /* Adjust based on slider height */
+        }
+
+        .slider-container {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .date-range-slider {
+            width: 100%;
+            margin: 10px 0;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        .date-range-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #4CAF50;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .date-range-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #4CAF50;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .date-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .chart-container {
+            height: 100%;
+            background: #fafafa;
+            padding: 0;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            text-align: center;
+            width: 80%;
+            max-width: 300px;
+        }
+
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 8px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 480px) {
+            .container {
+                padding: 5px;
+            }
+
+            .combined-chart-wrapper,
+            .chart-wrapper {
+                padding: 8px;
+                margin-bottom: 10px;
+                height: 100vh;
+                /* Ensure full height on mobile */
+            }
+
+            .chart-area {
+                height: calc(100vh - 120px);
+                /* Adjust based on slider height on mobile */
+            }
+
+            .slider-container {
+                padding: 10px;
+            }
+
+            .checkbox-container {
+                gap: 5px;
+            }
+
+            .checkbox-item {
+                font-size: 12px;
+            }
+
+            .date-labels {
+                font-size: 10px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="combined-chart-wrapper">
+            <!-- Checkbox Container -->
+            <div class="checkbox-container" id="symbolCheckboxes">
+                <!-- Checkboxes will be dynamically added here -->
+            </div>
+            <div class="chart-area">
+                <canvas id="combinedNormalizedChart"></canvas>
+            </div>
+            <div class="slider-container">
+                <input type="range" class="date-range-slider" id="dateSlider">
+                <div class="date-labels">
+                    <div id="startDateLabel">Start Date</div>
+                    <div id="currentDateLabel">Current Date</div>
+                    <div id="endDateLabel">End Date</div>
+                </div>
+            </div>
+        </div>
+        <div id="chartsContainer">
+            <!-- Individual charts will be dynamically added here -->
+        </div>
+        <div id="loadingIndicator" class="loading" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div>Loading data...</div>
+        </div>
+    </div>
+
+    <script>
+        const symbolsAndColors = [
+            { symbol: "shakhes", color: 'rgb(0, 30, 60)' },
+            { symbol: "dollar", color: 'rgb(150, 150, 60)' },
+            { symbol: "saham", color: 'rgb(255, 99, 132)' },
+            { symbol: "s_saham", color: 'rgb(70, 199, 232)' },
+            { symbol: "s_tala", color: 'rgb(54, 162, 235)' },
+            { symbol: "s_sabet", color: 'rgb(255, 206, 86)' },
+            { symbol: "s_zamin", color: 'rgb(75, 192, 192)' },
+            { symbol: "e_forush", color: 'rgb(153, 102, 255)' },
+            { symbol: "ati_ahrom", color: 'rgb(255, 99, 255)' },
+            { symbol: "s_dar_s", color: 'rgb(99, 255, 132)' },
+            { symbol: "sokuk", color: 'rgb(102, 178, 255)' },
+            { symbol: "e_kharid", color: 'rgb(102, 255, 178)' },
+            { symbol: "s_kala_ghaza", color: 'rgb(102, 255, 255)' },
+            { symbol: "apartment", color: 'rgb(155, 102, 255)' },
+            { symbol: "plotold", color: 'rgb(55, 102, 155)' }
+        ];
+
+        // Define colors
+        const colors = symbolsAndColors.map(item => item.color);
+
+        const baseChartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        parser: 'yyyy-MM-dd',
+                        tooltipFormat: 'yyyy-MM-dd'
+                    },
+                    title: {
+                        display: true,
+                        text: 'Date'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Value'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false, // Hide the default legend
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                }
+            }
+        };
+
+        // Mobile-specific Chart.js options
+        if (window.matchMedia("(max-width: 768px)").matches) {
+            Chart.defaults.font.size = 10;
+            Chart.defaults.plugins.legend.labels.boxWidth = 10;
+            Chart.defaults.plugins.legend.labels.padding = 5;
+        }
+
+        function normalizeDataWithinRange(data, startDate, endDate) {
+            const filteredData = data.filter(point => {
+                const date = new Date(point.x);
+                return date >= startDate && date <= endDate;
+            });
+
+            if (filteredData.length === 0) {
+                return [];
+            }
+
+            const yValues = filteredData.map(point => point.y);
+            const min = Math.min(...yValues);
+            const max = Math.max(...yValues);
+            const range = max - min;
+
+            return filteredData.map(point => ({
+                x: point.x,
+                y: range === 0 ? 0 : ((point.y - min) / range) * 2 - 1,
+            }));
+        }
+
+        function createCombinedChartWithCheckboxes(wrapper, datasets) {
+            const canvas = document.getElementById('combinedNormalizedChart');
+            const ctx = canvas.getContext('2d');
+
+            // Get all unique dates
+            const allDates = new Set();
+            datasets.forEach(dataset => dataset.data.forEach(point => allDates.add(new Date(point.x).getTime())));
+            const sortedDates = Array.from(allDates).sort((a, b) => a - b);
+
+            if (sortedDates.length === 0) {
+                console.error('No data available to display the chart.');
+                return;
+            }
+
+            // Initialize labels
+            document.getElementById('startDateLabel').textContent = new Date(sortedDates[0]).toISOString().split('T')[0];
+            document.getElementById('endDateLabel').textContent = new Date(sortedDates[sortedDates.length - 1]).toISOString().split('T')[0];
+            document.getElementById('currentDateLabel').textContent = new Date(sortedDates[0]).toISOString().split('T')[0];
+
+            // Initialize slider
+            const slider = document.getElementById('dateSlider');
+            slider.min = sortedDates[0];
+            slider.max = sortedDates[sortedDates.length - 1];
+            slider.step = 24 * 60 * 60 * 1000; // One day in milliseconds
+            slider.value = sortedDates[0];
+
+            // Normalize datasets initially for the full date range
+            const initialStartDate = new Date(sortedDates[0]);
+            const initialEndDate = new Date(sortedDates[sortedDates.length - 1]);
+
+            datasets.forEach((dataset) => {
+                dataset.normalizedData = normalizeDataWithinRange(dataset.data, initialStartDate, initialEndDate);
+            });
+
+            // Initialize chart data
+            const chartData = {
+                datasets: datasets.map((dataset, index) => ({
+                    label: dataset.symbol,
+                    data: dataset.normalizedData,
+                    borderColor: colors[index],
+                    tension: 0.1,
+                    hidden: false
+                })),
+            };
+
+            // Chart options
+            const options = {
+                ...baseChartOptions,
+                plugins: {
+                    ...baseChartOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'Combined Normalized Chart (Dynamic Normalization)',
+                    }
+                },
+            };
+
+            // Initialize Chart.js instance
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: options
+            });
+
+            // Handle slider input
+            slider.addEventListener('input', function (e) {
+                const selectedDate = new Date(parseInt(e.target.value));
+                document.getElementById('currentDateLabel').textContent = selectedDate.toISOString().split('T')[0];
+
+                datasets.forEach((dataset, i) => {
+                    chart.data.datasets[i].data = normalizeDataWithinRange(dataset.data, selectedDate, initialEndDate);
+                });
+
+                chart.update();
+            });
+
+            // Create Checkboxes
+            const checkboxContainer = document.getElementById('symbolCheckboxes');
+            symbolsAndColors.forEach((item, index) => {
+                const checkboxItem = document.createElement('div');
+                checkboxItem.className = 'checkbox-item';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `checkbox_${item.symbol}`;
+
+                // Set initial checked state based on symbol
+                checkbox.checked = ['saham', 's_tala', 's_sabet', 'apartment'].includes(item.symbol);
+                checkbox.dataset.index = index;
+
+                const label = document.createElement('label');
+                label.htmlFor = `checkbox_${item.symbol}`;
+                label.textContent = item.symbol;
+                label.style.color = item.color;
+
+                // Update initial chart visibility
+                const dataset = chart.data.datasets[index];
+                dataset.hidden = !checkbox.checked;
+
+                checkbox.addEventListener('change', function () {
+                    const dataset = chart.data.datasets[index];
+                    dataset.hidden = !this.checked;
+                    chart.update();
+                });
+
+                checkboxItem.appendChild(checkbox);
+                checkboxItem.appendChild(label);
+                checkboxContainer.appendChild(checkboxItem);
+            });
+
+            // Update chart after setting initial visibility
+            chart.update();
+            return chart;
+        }
+
+        function createCombinedNormalizedChart(data) {
+            const combinedDatasets = [];
+
+            // Create separate datasets for normalization
+            for (let item of symbolsAndColors) {
+                const dataset = createDataset(data, item.symbol);
+                if (!dataset) continue;
+
+                combinedDatasets.push({
+                    symbol: item.symbol,
+                    data: dataset.data,
+                });
+            }
+
+            createCombinedChartWithCheckboxes(document.querySelector('.combined-chart-wrapper'), combinedDatasets);
+        }
+
+        // Helper functions
+        function showLoading() {
+            document.getElementById('loadingIndicator').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingIndicator').style.display = 'none';
+        }
+
+        function formatDate(dateInt) {
+            const dateStr = dateInt.toString();
+            return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+        }
+
+        function createDataset(rawData, symbol) {
+            if (!rawData[symbol]) return null;
+
+            return {
+                data: rawData[symbol].map(point => ({
+                    x: formatDate(point.dt),
+                    y: point.cs
+                }))
+            };
+        }
+
+        function createChart(wrapper, dataset, symbol, color) {
+            // Create chart container
+            const container = document.createElement('div');
+            container.className = 'chart-container';
+            const canvas = document.createElement('canvas');
+            canvas.id = `chart_${symbol}`;
+            container.appendChild(canvas);
+
+            // Create slider container
+            const sliderContainer = document.createElement('div');
+            sliderContainer.className = 'slider-container';
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.className = 'date-range-slider';
+            slider.min = 0;
+            slider.max = dataset.data.length - 1;
+            slider.value = 0;
+            sliderContainer.appendChild(slider);
+
+            // Create date labels
+            const dateLabels = document.createElement('div');
+            dateLabels.className = 'date-labels';
+            const startDateLabel = document.createElement('div');
+            startDateLabel.textContent = dataset.data.length > 0 ? dataset.data[0].x : 'Start Date';
+            const currentDateLabel = document.createElement('div');
+            currentDateLabel.textContent = dataset.data.length > 0 ? dataset.data[0].x : 'Current Date';
+            const endDateLabel = document.createElement('div');
+            endDateLabel.textContent = dataset.data.length > 0 ? dataset.data[dataset.data.length - 1].x : 'End Date';
+
+            dateLabels.appendChild(startDateLabel);
+            dateLabels.appendChild(currentDateLabel);
+            dateLabels.appendChild(endDateLabel);
+
+            sliderContainer.appendChild(dateLabels);
+
+            wrapper.appendChild(container);
+            wrapper.appendChild(sliderContainer);
+
+            const ctx = canvas.getContext('2d');
+
+            const options = JSON.parse(JSON.stringify(baseChartOptions));
+            options.plugins.title = {
+                display: true,
+                text: `${symbol} - Original Values`
+            };
+
+            // Format Y-axis ticks to scientific notation
+            options.scales.y.ticks = {
+                callback: function (value) {
+                    return value.toExponential();
+                }
+            };
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: symbol,
+                        data: dataset.data,
+                        borderColor: color,
+                        tension: 0.1,
+                        hidden: false
+                    }]
+                },
+                options: options
+            });
+
+            // Handle slider input
+            slider.addEventListener('input', function (e) {
+                const startIndex = parseInt(e.target.value);
+                const slicedData = dataset.data.slice(startIndex);
+                currentDateLabel.textContent = slicedData.length > 0 ? slicedData[0].x : 'No Data';
+
+                chart.data.datasets[0].data = slicedData;
+                chart.update();
+            });
+        }
+
+        function createCharts(data) {
+            // Create the combined normalized chart
+            createCombinedNormalizedChart(data);
+
+            // Create individual charts
+            const chartsContainer = document.getElementById('chartsContainer');
+            chartsContainer.innerHTML = '';
+
+            for (let item of symbolsAndColors) {
+                const dataset = createDataset(data, item.symbol);
+                if (!dataset) continue;
+
+                const chartWrapper = document.createElement('div');
+                chartWrapper.className = 'chart-wrapper';
+                chartsContainer.appendChild(chartWrapper);
+
+                createChart(chartWrapper, dataset, item.symbol, item.color);
+            }
+        }
+
+        function handleError(error) {
+            console.error('Error fetching data:', error);
+            hideLoading();
+            const container = document.querySelector('.container');
+            const errorDiv = document.createElement('div');
+            errorDiv.textContent = 'Error loading chart data. Please try again later.';
+            errorDiv.style.color = 'red';
+            errorDiv.style.textAlign = 'center';
+            errorDiv.style.marginTop = '20px';
+            container.appendChild(errorDiv);
+        }
+
+        async function fetchData() {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+                const response = await fetch('https://62.3.41.232:8080/getAllCumulatives', {
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timeout');
+                }
+                throw error;
+            }
+        }
+
+        async function main() {
+            console.log('Main function started');
+            showLoading();
+
+            try {
+                const data = await fetchData();
+                if (data) {
+                    createCharts(data);
+                }
+                hideLoading();
+            } catch (error) {
+                handleError(error);
+            }
+        }
+
+        window.addEventListener('load', main);
+    </script>
+</body>
+
+</html>

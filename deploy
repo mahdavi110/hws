@@ -1,0 +1,15 @@
+# Create directory for your application
+cargo build --release
+systemctl stop hws 
+rm -rv /opt/hws/
+mkdir -p /opt/hws
+
+# Copy files
+cp ./target/release/hws /opt/hws/ -fv
+cp cert.pem key.pem /opt/hws/ -fv
+cp cumchart.html /opt/hws/ -fv
+
+# Set proper permissions
+chmod 755 /opt/hws/hws
+chmod 444 /opt/hws/cert.pem
+chmod 400 /opt/hws/key.pem
