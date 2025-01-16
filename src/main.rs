@@ -162,23 +162,23 @@ async fn kindex(
 async fn get_all_cumulatives() -> HttpResponse {
     let classes = [
         "saham",
+        "s_saham",
         "s_tala",
         "s_sabet",
         "s_zamin",
-        "e_forush",
-        "s_kala_seke",
         "s_amlak",
-        "salaf_saham",
+        "e_forush",
+        // "s_kala_seke",
+        // "salaf_saham",./
         "ati_ahrom",
         "s_dar_s",
-        "s_jasoor",
+        // "s_jasoor",
         "sokuk",
-        "s_mohktelet",
+        // "s_mohktelet",
         "e_kharid",
-        "s_bakhshi",
-        "hagh_taghadom",
+        // "s_bakhshi",
+        // "hagh_taghadom",
         "s_kala_ghaza",
-        "s_saham",
     ];
 
     let mut all_data = serde_json::Map::new();
@@ -193,6 +193,43 @@ async fn get_all_cumulatives() -> HttpResponse {
             }
         }
     }
+
+    for class in &classes {
+        match fetch_power_data(format!("mv_daily_power_{}", class)).await {
+            Ok(data) => {
+                all_data.insert("g".to_string() + &class.to_string(), json!(data));
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch data for {}: {:?}", class, e);
+                all_data.insert("g".to_string() + &class.to_string(), json!(null));
+            }
+        }
+    }
+
+    for class in &classes {
+        match fetch_vol_data(format!("mv_daily_vol_{}", class)).await {
+            Ok(data) => {
+                all_data.insert("v".to_string() + &class.to_string(), json!(data));
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch data for {}: {:?}", class, e);
+                all_data.insert("v".to_string() + &class.to_string(), json!(null));
+            }
+        }
+    }
+
+    // do not remove following commnets. 
+    // for class in &classes {
+    //     match fetch_price_data(format!("mv_daily_price_{}", class)).await {
+    //         Ok(data) => {
+    //             all_data.insert("p".to_string() + &class.to_string(), json!(data));
+    //         }
+    //         Err(e) => {
+    //             eprintln!("Failed to fetch data for {}: {:?}", class, e);
+    //             all_data.insert("p".to_string() + &class.to_string(), json!(null));
+    //         }
+    //     }
+    // }
 
     let dclasses = ["apartment", "plotold"];
 
@@ -253,6 +290,77 @@ async fn fetch_stock_data(table_name: String) -> Result<Vec<Value>, Error> {
     Ok(json_data)
 }
 
+async fn fetch_power_data(table_name: String) -> Result<Vec<Value>, Error> {
+    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
+    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Connection error: {}", e);
+        }
+    });
+
+    let rows = client
+        .query(&format!("SELECT * FROM {}", table_name), &[])
+        .await
+        .map_err(|e| {
+            eprintln!("Query error for table {}: {}", table_name, e);
+            e
+        })?;
+
+    let json_data: Vec<Value> = rows.iter().map(|row| prow_to_json(row)).collect();
+
+    Ok(json_data)
+}
+
+async fn fetch_vol_data(table_name: String) -> Result<Vec<Value>, Error> {
+    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
+    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Connection error: {}", e);
+        }
+    });
+
+    let rows = client
+        .query(&format!("SELECT * FROM {}", table_name), &[])
+        .await
+        .map_err(|e| {
+            eprintln!("Query error for table {}: {}", table_name, e);
+            e
+        })?;
+
+    let json_data: Vec<Value> = rows.iter().map(|row| vrow_to_json(row)).collect();
+
+    Ok(json_data)
+}
+
+
+// do not remove following comments. 
+// async fn fetch_price_data(table_name: String) -> Result<Vec<Value>, Error> {
+//     let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
+//     let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
+
+//     tokio::spawn(async move {
+//         if let Err(e) = connection.await {
+//             eprintln!("Connection error: {}", e);
+//         }
+//     });
+
+//     let rows = client
+//         .query(&format!("SELECT * FROM {}", table_name), &[])
+//         .await
+//         .map_err(|e| {
+//             eprintln!("Query error for table {}: {}", table_name, e);
+//             e
+//         })?;
+
+//     let json_data: Vec<Value> = rows.iter().map(|row| pr_row_to_json(row)).collect();
+
+//     Ok(json_data)
+// }
+
 async fn fetch_divar_data(table_name: String) -> Result<Vec<Value>, Error> {
     let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
     let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
@@ -304,7 +412,6 @@ async fn fetch_shakhes_data() -> Result<Vec<Value>, Error> {
 
     Ok(json_data)
 }
-
 
 async fn fetch_dollar_data() -> Result<Vec<Value>, Error> {
     let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
@@ -359,10 +466,30 @@ fn srow_to_json(row: &Row) -> serde_json::Value {
 fn lrow_to_json(row: &Row) -> serde_json::Value {
     json!({
         "dt": row.get::<_, i64>("date"),
-        "cs": row.get::<_, i32>("dollar_price") as f64 
+        "cs": row.get::<_, i32>("dollar_price") as f64
     })
 }
 
+fn prow_to_json(row: &Row) -> serde_json::Value {
+    json!({
+        "dt": row.get::<_, i64>("trade_date"),
+        "cs": row.get::<_, f64>("cumulative_power_difference")
+    })
+}
+
+fn vrow_to_json(row: &Row) -> serde_json::Value {
+    json!({
+        "dt": row.get::<_, i64>("trading_date"),
+        "cs": row.get::<_, f64>("sum_cap")
+    })
+}
+
+// fn pr_row_to_json(row: &Row) -> serde_json::Value {
+//     json!({
+//         "dt": row.get::<_, i64>("trading_date"),
+//         "cs": row.get::<_, f64>("average_closing_price")
+//     })
+// }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

@@ -5,7 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tehran Stock History</title>
+    <!-- Chart.js Library -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Date Adapter -->
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
@@ -35,7 +37,18 @@
             /* Enable scrolling within the container */
         }
 
-        .combined-chart-wrapper,
+        .combined-chart-wrapper {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 15px;
+            flex: 1;
+            /* Allow the chart wrapper to grow */
+            display: flex;
+            flex-direction: column;
+        }
+
         .chart-wrapper {
             background: white;
             padding: 10px;
@@ -67,27 +80,26 @@
 
         .chart-area {
             flex: 1;
+            /* Make the chart area take available space */
             position: relative;
-            height: calc(100vh - 150px);
-            /* Adjust based on slider height */
         }
 
         .slider-container {
-            margin-top: 15px;
             padding: 15px;
             background-color: #f8f9fa;
             border-radius: 5px;
+            margin-top: 10px;
+            /* Give some space from the chart */
         }
 
         .date-range-slider {
             width: 100%;
             margin: 10px 0;
-            -webkit-appearance: none;
-            appearance: none;
             height: 4px;
             background: #ddd;
             border-radius: 2px;
         }
+
 
         .date-range-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
@@ -163,7 +175,10 @@
                 padding: 5px;
             }
 
-            .combined-chart-wrapper,
+            .combined-chart-wrapper {
+                margin-bottom: 10px;
+            }
+
             .chart-wrapper {
                 padding: 8px;
                 margin-bottom: 10px;
@@ -224,27 +239,57 @@
     </div>
 
     <script>
+        // Define symbols and their corresponding colors
         const symbolsAndColors = [
-            { symbol: "shakhes", color: 'rgb(0, 30, 60)' },
-            { symbol: "dollar", color: 'rgb(150, 150, 60)' },
-            { symbol: "saham", color: 'rgb(255, 99, 132)' },
-            { symbol: "s_saham", color: 'rgb(70, 199, 232)' },
-            { symbol: "s_tala", color: 'rgb(54, 162, 235)' },
-            { symbol: "s_sabet", color: 'rgb(255, 206, 86)' },
-            { symbol: "s_zamin", color: 'rgb(75, 192, 192)' },
-            { symbol: "e_forush", color: 'rgb(153, 102, 255)' },
-            { symbol: "ati_ahrom", color: 'rgb(255, 99, 255)' },
-            { symbol: "s_dar_s", color: 'rgb(99, 255, 132)' },
-            { symbol: "sokuk", color: 'rgb(102, 178, 255)' },
-            { symbol: "e_kharid", color: 'rgb(102, 255, 178)' },
-            { symbol: "s_kala_ghaza", color: 'rgb(102, 255, 255)' },
-            { symbol: "apartment", color: 'rgb(155, 102, 255)' },
-            { symbol: "plotold", color: 'rgb(55, 102, 155)' }
+            { symbol: "shakhes", color: 'rgb(0, 45, 90)' },
+            { symbol: "dollar", color: 'rgb(150, 120, 0)' },
+            
+            { symbol: "saham", color: 'rgb(200, 45, 75)' },
+            { symbol: "s_saham", color: 'rgb(35, 125, 180)' },
+            { symbol: "s_tala", color: 'rgb(25, 95, 165)' },
+            { symbol: "s_sabet", color: 'rgb(180, 130, 0)' },
+            { symbol: "s_zamin", color: 'rgb(45, 130, 130)' },
+            { symbol: "s_amlak", color: 'rgb(145, 130, 30)' },
+            { symbol: "e_forush", color: 'rgb(110, 45, 180)' },
+            { symbol: "ati_ahrom", color: 'rgb(180, 45, 180)' },
+            { symbol: "s_dar_s", color: 'rgb(45, 150, 75)' },
+            { symbol: "sokuk", color: 'rgb(45, 95, 180)' },
+            { symbol: "e_kharid", color: 'rgb(45, 150, 110)' },
+            { symbol: "s_kala_ghaza", color: 'rgb(45, 140, 140)' },
+            { symbol: "gsaham", color: 'rgb(180, 55, 35)' },
+            { symbol: "gs_saham", color: 'rgb(45, 135, 140)' },
+            { symbol: "gs_tala", color: 'rgb(35, 105, 135)' },
+            { symbol: "gs_sabet", color: 'rgb(190, 110, 0)' },
+            { symbol: "gs_zamin", color: 'rgb(55, 140, 90)' },
+            { symbol: "gs_amlak", color: 'rgb(155, 140, 50)' },
+            { symbol: "ge_forush", color: 'rgb(160, 55, 110)' },
+            { symbol: "gati_ahrom", color: 'rgb(170, 55, 120)' },
+            { symbol: "gs_dar_s", color: 'rgb(55, 160, 35)' },
+            { symbol: "gsokuk", color: 'rgb(55, 105, 140)' },
+            { symbol: "ge_kharid", color: 'rgb(55, 160, 70)' },
+            { symbol: "gs_kala_ghaza", color: 'rgb(55, 150, 100)' },
+
+            { symbol: "vsaham", color: 'rgb(160, 35, 165)' },
+            { symbol: "vs_saham", color: 'rgb(25, 115, 255)' },
+            { symbol: "vs_tala", color: 'rgb(15, 85, 255)' },
+            { symbol: "vs_sabet", color: 'rgb(170, 120, 100)' },
+            { symbol: "vs_zamin", color: 'rgb(35, 120, 220)' },
+            { symbol: "vs_amlak", color: 'rgb(155, 140, 50)' },
+            { symbol: "ve_forush", color: 'rgb(150, 35, 250)' },
+            { symbol: "vati_ahrom", color: 'rgb(160, 35, 255)' },
+            { symbol: "vs_dar_s", color: 'rgb(35, 140, 165)' },
+            { symbol: "vsokuk", color: 'rgb(35, 85, 255)' },
+            { symbol: "ve_kharid", color: 'rgb(35, 140, 200)' },
+            { symbol: "vs_kala_ghaza", color: 'rgb(35, 130, 230)' },
+            
+            { symbol: "apartment", color: 'rgb(95, 45, 255)' },
+            { symbol: "plotold", color: 'rgb(25, 65, 205)' }
         ];
 
-        // Define colors
+        // Define colors for easy access
         const colors = symbolsAndColors.map(item => item.color);
 
+        // Base Chart.js options
         const baseChartOptions = {
             responsive: true,
             maintainAspectRatio: false,
@@ -274,6 +319,10 @@
                 tooltip: {
                     mode: 'index',
                     intersect: false
+                },
+                crosshair: {
+                    color: 'rgba(255, 0, 0, 0.8)', // Customize crosshair color
+                    lineWidth: 1.5 // Customize crosshair line width
                 }
             }
         };
@@ -285,6 +334,87 @@
             Chart.defaults.plugins.legend.labels.padding = 5;
         }
 
+        /**
+         * Crosshair Plugin Definition
+         */
+        const crosshairPlugin = {
+            id: 'crosshair',
+            afterInit: function (chart, args, options) {
+                chart.crosshair = {
+                    x: null,
+                    y: null
+                };
+
+                const canvas = chart.canvas;
+
+                // Mouse move handler
+                const mouseMoveHandler = (event) => {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+                    chart.crosshair.x = x;
+                    chart.crosshair.y = y;
+                    chart.draw();
+                };
+
+                // Mouse out handler
+                const mouseOutHandler = () => {
+                    chart.crosshair.x = null;
+                    chart.crosshair.y = null;
+                    chart.draw();
+                };
+
+                canvas.addEventListener('mousemove', mouseMoveHandler);
+                canvas.addEventListener('mouseout', mouseOutHandler);
+
+                // Store handlers to remove them later if needed
+                chart._crosshairHandlers = { mouseMoveHandler, mouseOutHandler };
+            },
+            afterDraw: function (chart, args, options) {
+                if (chart.crosshair.x !== null && chart.crosshair.y !== null) {
+                    const ctx = chart.ctx;
+                    const x = chart.crosshair.x;
+                    const y = chart.crosshair.y;
+                    const chartArea = chart.chartArea;
+
+                    ctx.save();
+                    ctx.strokeStyle = options.color || 'rgba(0,0,0,0.8)';
+                    ctx.lineWidth = options.lineWidth || 1;
+
+                    // Draw vertical line
+                    ctx.beginPath();
+                    ctx.moveTo(x, chartArea.top);
+                    ctx.lineTo(x, chartArea.bottom);
+                    ctx.stroke();
+
+                    // Draw horizontal line
+                    ctx.beginPath();
+                    ctx.moveTo(chartArea.left, y);
+                    ctx.lineTo(chartArea.right, y);
+                    ctx.stroke();
+
+                    ctx.restore();
+                }
+            },
+            beforeDestroy: function (chart) {
+                const handlers = chart._crosshairHandlers;
+                if (handlers) {
+                    chart.canvas.removeEventListener('mousemove', handlers.mouseMoveHandler);
+                    chart.canvas.removeEventListener('mouseout', handlers.mouseOutHandler);
+                }
+            }
+        };
+
+        // Register the Crosshair Plugin globally
+        Chart.register(crosshairPlugin);
+
+        /**
+         * Normalize data within a given date range
+         * @param {Array} data - Array of data points
+         * @param {Date} startDate - Start date for normalization
+         * @param {Date} endDate - End date for normalization
+         * @returns {Array} - Normalized data points
+         */
         function normalizeDataWithinRange(data, startDate, endDate) {
             const filteredData = data.filter(point => {
                 const date = new Date(point.x);
@@ -306,6 +436,12 @@
             }));
         }
 
+        /**
+         * Create the combined normalized chart with checkboxes
+         * @param {HTMLElement} wrapper - The wrapper element for the chart
+         * @param {Array} datasets - Array of dataset objects
+         * @returns {Chart} - The created Chart.js instance
+         */
         function createCombinedChartWithCheckboxes(wrapper, datasets) {
             const canvas = document.getElementById('combinedNormalizedChart');
             const ctx = canvas.getContext('2d');
@@ -351,16 +487,11 @@
                 })),
             };
 
-            // Chart options
-            const options = {
-                ...baseChartOptions,
-                plugins: {
-                    ...baseChartOptions.plugins,
-                    title: {
-                        display: true,
-                        text: 'Combined Normalized Chart (Dynamic Normalization)',
-                    }
-                },
+            // Clone base options and add title
+            const options = JSON.parse(JSON.stringify(baseChartOptions));
+            options.plugins.title = {
+                display: true,
+                text: 'Combined Normalized Chart (Dynamic Normalization)',
             };
 
             // Initialize Chart.js instance
@@ -401,14 +532,18 @@
                 label.textContent = item.symbol;
                 label.style.color = item.color;
 
-                // Update initial chart visibility
+                // Verify dataset exists before setting hidden property
                 const dataset = chart.data.datasets[index];
-                dataset.hidden = !checkbox.checked;
+                if (dataset) {  // Add this check
+                    dataset.hidden = !checkbox.checked;
+                }
 
                 checkbox.addEventListener('change', function () {
                     const dataset = chart.data.datasets[index];
-                    dataset.hidden = !this.checked;
-                    chart.update();
+                    if (dataset) {  // Add this check
+                        dataset.hidden = !this.checked;
+                        chart.update();
+                    }
                 });
 
                 checkboxItem.appendChild(checkbox);
@@ -421,6 +556,10 @@
             return chart;
         }
 
+        /**
+         * Create the combined normalized chart
+         * @param {Object} data - The fetched data
+         */
         function createCombinedNormalizedChart(data) {
             const combinedDatasets = [];
 
@@ -438,20 +577,36 @@
             createCombinedChartWithCheckboxes(document.querySelector('.combined-chart-wrapper'), combinedDatasets);
         }
 
-        // Helper functions
+        /**
+         * Show loading indicator
+         */
         function showLoading() {
             document.getElementById('loadingIndicator').style.display = 'block';
         }
 
+        /**
+         * Hide loading indicator
+         */
         function hideLoading() {
             document.getElementById('loadingIndicator').style.display = 'none';
         }
 
+        /**
+         * Format date from integer to 'yyyy-MM-dd'
+         * @param {number} dateInt - Date as integer in 'yyyyMMdd' format
+         * @returns {string} - Formatted date string
+         */
         function formatDate(dateInt) {
             const dateStr = dateInt.toString();
             return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
         }
 
+        /**
+         * Create dataset for a given symbol
+         * @param {Object} rawData - The raw fetched data
+         * @param {string} symbol - The symbol name
+         * @returns {Object|null} - The dataset object or null if symbol not found
+         */
         function createDataset(rawData, symbol) {
             if (!rawData[symbol]) return null;
 
@@ -463,6 +618,13 @@
             };
         }
 
+        /**
+         * Create an individual chart
+         * @param {HTMLElement} wrapper - The wrapper element for the chart
+         * @param {Object} dataset - The dataset object
+         * @param {string} symbol - The symbol name
+         * @param {string} color - The color for the chart
+         */
         function createChart(wrapper, dataset, symbol, color) {
             // Create chart container
             const container = document.createElement('div');
@@ -503,6 +665,7 @@
 
             const ctx = canvas.getContext('2d');
 
+            // Clone base options and customize
             const options = JSON.parse(JSON.stringify(baseChartOptions));
             options.plugins.title = {
                 display: true,
@@ -541,6 +704,10 @@
             });
         }
 
+        /**
+         * Create all individual charts
+         * @param {Object} data - The fetched data
+         */
         function createCharts(data) {
             // Create the combined normalized chart
             createCombinedNormalizedChart(data);
@@ -561,6 +728,10 @@
             }
         }
 
+        /**
+         * Handle errors during data fetching
+         * @param {Error} error - The error object
+         */
         function handleError(error) {
             console.error('Error fetching data:', error);
             hideLoading();
@@ -573,6 +744,10 @@
             container.appendChild(errorDiv);
         }
 
+        /**
+         * Fetch data from the server
+         * @returns {Promise<Object>} - The fetched JSON data
+         */
         async function fetchData() {
             try {
                 const controller = new AbortController();
@@ -599,6 +774,9 @@
             }
         }
 
+        /**
+         * Initialize the application
+         */
         async function main() {
             console.log('Main function started');
             showLoading();
@@ -614,6 +792,7 @@
             }
         }
 
+        // Start the application on window load
         window.addEventListener('load', main);
     </script>
 </body>
