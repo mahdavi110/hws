@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_files::NamedFile;
+use actix_files::Files;
 use actix_web::{
     get, middleware::Logger, web, App, HttpMessage, HttpRequest, HttpResponse, HttpServer,
 };
@@ -9,6 +9,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     cell::Cell,
+    fs::File,      // برای خواندن فایل
+    io::BufReader, // برای خواندن بهینه فایل
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -16,6 +18,12 @@ use std::{
     time::Duration,
 };
 use tokio_postgres::{Error, NoTls, Row};
+
+// ساختار جدید برای نگهداری تنظیمات خوانده شده از config.json
+#[derive(Deserialize)]
+struct Config {
+    port: u16,
+}
 
 // This struct represents state
 struct AppState {
@@ -29,12 +37,6 @@ struct KInfo {
     username: String,
     name: String,
     id: u32,
-}
-
-#[get("/ch1")]
-async fn serve_chart() -> actix_web::Result<NamedFile> {
-    eprintln!("getting cumchart.html");
-    Ok(NamedFile::open("cumchart.html")?)
 }
 
 #[get("/")]
@@ -142,16 +144,16 @@ async fn kindex(
 
     HttpResponse::Ok()
         .cookie(
-            cookie::Cookie::build("visit_count", new_visit_count.to_string())
+            actix_web::cookie::Cookie::build("visit_count", new_visit_count.to_string())
                 .path("/")
-                .max_age(cookie::time::Duration::days(30))
+                .max_age(actix_web::cookie::time::Duration::days(30))
                 .http_only(true)
                 .finish(),
         )
         .cookie(
-            cookie::Cookie::build("last_visit", chrono::Local::now().to_rfc3339())
+            actix_web::cookie::Cookie::build("last_visit", chrono::Local::now().to_rfc3339())
                 .path("/")
-                .max_age(cookie::time::Duration::days(30))
+                .max_age(actix_web::cookie::time::Duration::days(30))
                 .http_only(true)
                 .finish(),
         )
@@ -163,6 +165,7 @@ async fn get_all_cumulatives() -> HttpResponse {
     let classes = [
         "saham",
         "s_saham",
+        "ahrom",
         "s_tala",
         "s_sabet",
         "s_zamin",
@@ -179,6 +182,7 @@ async fn get_all_cumulatives() -> HttpResponse {
         // "s_bakhshi",
         // "hagh_taghadom",
         "s_kala_ghaza",
+        "saham_majmu",
     ];
 
     let mut all_data = serde_json::Map::new();
@@ -218,7 +222,7 @@ async fn get_all_cumulatives() -> HttpResponse {
         }
     }
 
-    // do not remove following commnets. 
+    // do not remove following commnets.
     // for class in &classes {
     //     match fetch_price_data(format!("mv_daily_price_{}", class)).await {
     //         Ok(data) => {
@@ -264,6 +268,40 @@ async fn get_all_cumulatives() -> HttpResponse {
             all_data.insert("dollar".into(), json!(null));
         }
     }
+
+    // Compute shakhes/dollar ratio with forward filling
+    if let (Some(shakhes), Some(dollar)) = (
+        all_data.get("shakhes").and_then(|v| v.as_array()),
+        all_data.get("dollar").and_then(|v| v.as_array()),
+    ) {
+        let mut all_dates = shakhes
+            .iter()
+            .map(|x| x["dt"].as_i64().unwrap())
+            .chain(dollar.iter().map(|x| x["dt"].as_i64().unwrap()))
+            .collect::<Vec<_>>();
+        all_dates.sort_unstable();
+        all_dates.dedup();
+
+        let mut prev_shakhes = None;
+        let mut prev_dollar = None;
+        let mut ratio_data = Vec::new();
+
+        for &date in &all_dates {
+            if let Some(s) = shakhes.iter().find(|x| x["dt"].as_i64().unwrap() == date) {
+                prev_shakhes = Some(s["cs"].as_f64().unwrap());
+            }
+            if let Some(d) = dollar.iter().find(|x| x["dt"].as_i64().unwrap() == date) {
+                prev_dollar = Some(d["cs"].as_f64().unwrap());
+            }
+            if let (Some(s), Some(d)) = (prev_shakhes, prev_dollar) {
+                ratio_data.push(json!({ "dt": date, "cs": s / d }));
+            }
+        }
+        all_data.insert("shakhes_dollar_ratio".into(), json!(ratio_data));
+    } else {
+        all_data.insert("shakhes_dollar_ratio".into(), json!(null));
+    }
+
     HttpResponse::Ok().json(all_data)
 }
 
@@ -336,8 +374,7 @@ async fn fetch_vol_data(table_name: String) -> Result<Vec<Value>, Error> {
     Ok(json_data)
 }
 
-
-// do not remove following comments. 
+// do not remove following comments.
 // async fn fetch_price_data(table_name: String) -> Result<Vec<Value>, Error> {
 //     let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
 //     let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
@@ -493,6 +530,21 @@ fn vrow_to_json(row: &Row) -> serde_json::Value {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // --- شروع تغییرات ---
+
+    // 1. خواندن فایل کانفیگ
+    let config_file = File::open("config.json").expect("Failed to open config.json");
+    let reader = BufReader::new(config_file);
+
+    // 2. پارس کردن محتوای JSON به ساختار Config
+    let config: Config = serde_json::from_reader(reader).expect("Failed to parse config.json");
+
+    // 3. ساخت آدرس داینامیک
+    let address = format!("0.0.0.0:{}", config.port);
+    println!("Server starting on {}...", address);
+
+    // --- پایان تغییرات ---
+
     // Initialize SSL/TLS configuration
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
@@ -515,16 +567,22 @@ async fn main() -> std::io::Result<()> {
                 _count: Cell::new(0),
                 global_count: Arc::new(AtomicUsize::new(0)),
             }))
+            .service(
+                Files::new("/htmls", "htmls")
+                    .prefer_utf8(true)
+                    .use_etag(true)
+                    .use_last_modified(true),
+            )
             .service(kindex)
-            .service(serve_chart)
             .service(get_all_cumulatives) // Add the new route
             .route("/ok", web::to(HttpResponse::Ok))
     })
-    .bind_openssl("0.0.0.0:8080", builder)?
+    .bind_openssl(address, builder)? // استفاده از آدرس داینامیک
     .keep_alive(Duration::from_secs(75))
     .shutdown_timeout(5)
     .run()
     .await
 }
 
+// -- do not remove the following line.
 //https://api.tgju.org/v1/market/indicator/summary-table-data/price_dollar_rl?lang=fa&order_dir=asc&start=0&length=600000&from=&to=&convert_to_ad=1
