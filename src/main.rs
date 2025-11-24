@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     cell::Cell,
+    env,
     fs::File,      // برای خواندن فایل
     io::BufReader, // برای خواندن بهینه فایل
     sync::{
@@ -37,6 +38,28 @@ struct KInfo {
     username: String,
     name: String,
     id: u32,
+}
+
+fn build_conn_str() -> String {
+    let host = env::var("PGHOST").unwrap_or_else(|_| "pgdk".to_string());
+    let port = env::var("PGPORT").unwrap_or_else(|_| "5432".to_string());
+    let user = env::var("PGUSER").unwrap_or_else(|_| "dev".to_string());
+    let password = env::var("PGPASSWORD").unwrap_or_else(|_| "vatanampareyetanameyiran".to_string());
+    let db = env::var("PGDATABASE").unwrap_or_else(|_| "appdb".to_string());
+    format!("host={} port={} user={} password={} dbname={}", host, port, user, password, db)
+}
+
+async fn get_client() -> Result<tokio_postgres::Client, Error> {
+    let conn_str = build_conn_str();
+    let (client, connection) = tokio_postgres::connect(&conn_str, NoTls).await?;
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Connection error: {}", e);
+        }
+    });
+
+    Ok(client)
 }
 
 #[get("/")]
@@ -306,14 +329,7 @@ async fn get_all_cumulatives() -> HttpResponse {
 }
 
 async fn fetch_stock_data(table_name: String) -> Result<Vec<Value>, Error> {
-    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
-    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
+    let client = get_client().await?;
 
     let rows = client
         .query(&format!("SELECT * FROM {}", table_name), &[])
@@ -329,14 +345,7 @@ async fn fetch_stock_data(table_name: String) -> Result<Vec<Value>, Error> {
 }
 
 async fn fetch_power_data(table_name: String) -> Result<Vec<Value>, Error> {
-    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
-    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
+    let client = get_client().await?;
 
     let rows = client
         .query(&format!("SELECT * FROM {}", table_name), &[])
@@ -352,14 +361,7 @@ async fn fetch_power_data(table_name: String) -> Result<Vec<Value>, Error> {
 }
 
 async fn fetch_vol_data(table_name: String) -> Result<Vec<Value>, Error> {
-    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
-    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
+    let client = get_client().await?;
 
     let rows = client
         .query(&format!("SELECT * FROM {}", table_name), &[])
@@ -399,14 +401,7 @@ async fn fetch_vol_data(table_name: String) -> Result<Vec<Value>, Error> {
 // }
 
 async fn fetch_divar_data(table_name: String) -> Result<Vec<Value>, Error> {
-    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
-    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
+    let client = get_client().await?;
 
     let rows = client
         .query(&format!("SELECT * FROM {}", table_name), &[])
@@ -422,14 +417,7 @@ async fn fetch_divar_data(table_name: String) -> Result<Vec<Value>, Error> {
 }
 
 async fn fetch_shakhes_data() -> Result<Vec<Value>, Error> {
-    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
-    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
+    let client = get_client().await?;
 
     // Modified query to cast numeric to double precision
     let rows = client
@@ -451,14 +439,7 @@ async fn fetch_shakhes_data() -> Result<Vec<Value>, Error> {
 }
 
 async fn fetch_dollar_data() -> Result<Vec<Value>, Error> {
-    let conn_str = "host=localhost user=postgres password=eepa dbname=bourse";
-    let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
-        }
-    });
+    let client = get_client().await?;
 
     // Modified query to cast numeric to double precision
     let rows = client
@@ -539,8 +520,12 @@ async fn main() -> std::io::Result<()> {
     // 2. پارس کردن محتوای JSON به ساختار Config
     let config: Config = serde_json::from_reader(reader).expect("Failed to parse config.json");
 
-    // 3. ساخت آدرس داینامیک
-    let address = format!("0.0.0.0:{}", config.port);
+    // 3. ساخت آدرس داینامیک (قابل override با HWS_PORT)
+    let port = env::var("HWS_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(config.port);
+    let address = format!("0.0.0.0:{}", port);
     println!("Server starting on {}...", address);
 
     // --- پایان تغییرات ---
