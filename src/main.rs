@@ -45,7 +45,7 @@ fn build_conn_str() -> String {
     let port = env::var("PGPORT").unwrap_or_else(|_| "5432".to_string());
     let user = env::var("PGUSER").unwrap_or_else(|_| "dev".to_string());
     let password = env::var("PGPASSWORD").unwrap_or_else(|_| "vatanampareyetanameyiran".to_string());
-    let db = env::var("PGDATABASE").unwrap_or_else(|_| "appdb".to_string());
+    let db = env::var("PGDATABASE").unwrap_or_else(|_| "bourse".to_string());
     format!("host={} port={} user={} password={} dbname={}", host, port, user, password, db)
 }
 
