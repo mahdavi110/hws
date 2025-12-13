@@ -3,7 +3,7 @@ use actix_files::Files;
 use actix_web::{
     get, middleware::Logger, web, App, HttpMessage, HttpRequest, HttpResponse, HttpServer,
 };
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -60,6 +60,11 @@ async fn get_client() -> Result<tokio_postgres::Client, Error> {
     });
 
     Ok(client)
+}
+
+fn parse_compact_yyyymmdd(dt: i64) -> Option<NaiveDate> {
+    let s = dt.to_string();
+    NaiveDate::parse_from_str(&s, "%Y%m%d").ok()
 }
 
 #[get("/")]
@@ -181,6 +186,64 @@ async fn kindex(
                 .finish(),
         )
         .body(request_info.join("\n"))
+}
+
+#[get("/healthz")]
+async fn healthz() -> HttpResponse {
+    let started_at = Utc::now().to_rfc3339();
+
+    let max_stale_days: i64 = env::var("HWS_HEALTH_MAX_STALE_DAYS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7);
+
+    let client = match get_client().await {
+        Ok(client) => client,
+        Err(e) => {
+            return HttpResponse::ServiceUnavailable().json(json!({
+                "ok": false,
+                "at": started_at,
+                "db_ok": false,
+                "error": format!("{e}"),
+            }));
+        }
+    };
+
+    if let Err(e) = client.query_one("select 1", &[]).await {
+        return HttpResponse::ServiceUnavailable().json(json!({
+            "ok": false,
+            "at": started_at,
+            "db_ok": false,
+            "error": format!("{e}"),
+        }));
+    }
+
+    let (max_dt, max_dt_error): (Option<i64>, Option<String>) = match client
+        .query_one("select max(recdate)::bigint as max_dt from mv_stock_cumulative_saham", &[])
+        .await
+    {
+        Ok(row) => (row.try_get::<_, Option<i64>>("max_dt").ok().flatten(), None),
+        Err(e) => (None, Some(format!("{e}"))),
+    };
+
+    let (days_behind, stale) = match max_dt.and_then(parse_compact_yyyymmdd) {
+        Some(max_date) => {
+            let today = Utc::now().date_naive();
+            let diff = (today - max_date).num_days();
+            (Some(diff), diff > max_stale_days)
+        }
+        None => (None, true),
+    };
+
+    HttpResponse::Ok().json(json!({
+        "ok": !stale,
+        "at": started_at,
+        "db_ok": true,
+        "max_dt": max_dt,
+        "max_dt_error": max_dt_error,
+        "days_behind": days_behind,
+        "max_stale_days": max_stale_days,
+    }))
 }
 
 #[get("/getAllCumulatives")]
@@ -559,6 +622,7 @@ async fn main() -> std::io::Result<()> {
                     .use_last_modified(true),
             )
             .service(kindex)
+            .service(healthz)
             .service(get_all_cumulatives) // Add the new route
             .route("/ok", web::to(HttpResponse::Ok))
     })
