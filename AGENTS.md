@@ -1,7 +1,15 @@
 # HWS — Market History API Guide
 
+> **Last full update:** 2026-09-30 (JWT + 24h cache + new paths + split classes + tag hwsdk:latest).
+
 > **For AI agents working on the HWS codebase.**
-> HWS is an **HTTPS API + static file server** that exposes aggregated historical market data (cumulative money flow, buyer/seller power, trading volume) as a single JSON endpoint consumed by `cumchart.html`. It reads directly from the `bourse` PostgreSQL database — it **does not write anything**.
+> HWS is an **HTTP API + static file server** (internal network only; TLS removed 2026-09-30) that exposes aggregated historical market data (cumulative money flow, buyer/seller power, trading volume) as a single JSON endpoint consumed by `cumchart.html`. It reads directly from the `bourse` PostgreSQL database — it **does not write anything**.
+
+Key facts (2026-09-30):
+- **JWT-protected** `getAllCumulatives` — secret from `JWT_SECRET` env var, no fallback.
+- **24-hour in-process cache** on `getAllCumulatives`.
+- **Path prefix `/history/`** for API and static chart page.
+- **Image tag:** `hwsdk:latest` (not `hws:latest`).
 >
 > This document describes the code as of 2026-09-15.
 
@@ -39,7 +47,12 @@
 
 ---
 
-## 2. Live State (as of 2026-09-15)
+## 2. Live State (as of 2026-09-30)
+
+- **Image:** `hwsdk:latest` (built from `Dockerfile.hws`). The Dockerfile tags as `hws:latest` — must be re-tagged as `hwsdk:latest` (`docker tag hws:latest hwsdk:latest`) before compose can use it.
+- **Container:** `hwsdk` on `dock_net`. Internal port 8085. No host port (proxied via `brx`).
+- **TLS:** removed 2026-09-30. HTTP-only on the internal Docker network.
+- **CUM_CACHE:** `static CUM_CACHE: RwLock<Option<(Instant, String)>>` in `main.rs`. TTL = 24h. First request ~1.5s; subsequent within TTL ~6ms.
 
 | Item | Value |
 |------|-------|
@@ -104,36 +117,31 @@ Related files outside this repo (in the parent `dock`):
 ### 4.1 Entry point (`main`)
 
 ```rust
-let config = parse("config.json");              // → { port: 8084 }
+let config = parse("config.json");              // → { port: 8085 }
 let port   = env HWS_PORT  or  config.port;
-SslAcceptor::mozilla_intermediate(SslMethod::tls())
-    .set_private_key_file("key.pem", PEM)
-    .set_certificate_chain_file("cert.pem")
+// JWT_SECRET must be set — process exits if missing.
+let secret = env::var("JWT_SECRET").map_err(|_| ())?;
 
 HttpServer::new(|| {
     App::new()
         .wrap(Cors::default().allow_any_origin().allow_any_method().allow_any_header())
         .wrap(Logger::default())
-        .service(Files::new("/htmls", "htmls"))
-        .service(kindex)              // GET /
+        .service(Files::new("/history", "htmls"))
+        .service(serve_history)       // GET /history
         .service(healthz)             // GET /healthz
-        .service(get_all_cumulatives) // GET /getAllCumulatives
+        .service(get_all_cumulatives) // GET /history/getAllCumulatives
         .route("/ok", web::to(HttpResponse::Ok))
 })
-.bind_openssl(format!("0.0.0.0:{port}"), builder)?
+.bind(format!("0.0.0.0:{port}"))?
 .keep_alive(75s)
 .run()
 ```
 
-### 4.2 `GET /` — `kindex()`
+### 4.2 `GET /history` — `serve_history()`
 
-A **debug page**, not the main UI. Returns plain text with:
-- Visit counter (incrementing per request, doubled oddly by a `fetch_add(3)` — likely a bug)
-- Full request details: method, URI, headers, cookies, peer address
-- Cookie `visit_count` is set (30-day expiry)
-- Cookies `last_visit` set with RFC3339 timestamp
+Serves `htmls/cumchart.html`. The HTML internally calls `../getAllCumulatives`, which from `/history` resolves to `/history/getAllCumulatives`.
 
-Query parameters: `username`, `name`, `id` (`KInfo` struct) — all unused besides being echoed back.
+> The `kindex` debug page was removed 2026-09-30.
 
 ### 4.3 `GET /healthz` — `healthz()`
 
@@ -160,7 +168,11 @@ Logic:
 
 ⚠ **Uses UTC for "today"**, but `max_dt` is a **Tehran-local** date from the DB. Around midnight Tehran time, `days_behind` may be off by one.
 
-### 4.4 `GET /getAllCumulatives` — the main API
+### 4.4 `GET /history/getAllCumulatives` — the main API
+
+**Requires `Authorization: Bearer <jwt>`** (HS256, JWT_SECRET). Returns 401 if missing/invalid.
+
+**Cache:** response body stored in CUM_CACHE for 24h. First request ~1.5s; subsequent within TTL ~6ms.
 
 Returns one big JSON object keyed by class name / prefixed class name.
 
@@ -223,10 +235,12 @@ This means the ratio series begins at the **later** of the two start dates.
 Single-page app. Calls **only one endpoint**:
 
 ```js
-const response = await fetch('../getAllCumulatives');
+const response = await fetch('/history/getAllCumulatives', {
+  headers: { 'Authorization': 'Bearer ' + localStorage.getItem('brx_token') }
+});
 ```
 
-Served at `/htmls/cumchart.html` → the relative URL resolves to `/getAllCumulatives`. This is why HWS mounts the static files at `/htmls` and the API at `/getAllCumulatives` — they are intentionally siblings.
+Served at `/history` (via the `serve_history` route in hws, or via the `brx` proxy at `staging.brxchart.ir/history`). On 401 it redirects to `/html/login.html`.
 
 ### UI features
 
@@ -255,6 +269,13 @@ Served at `/htmls/cumchart.html` → the relative URL resolves to `/getAllCumula
 ---
 
 ## 6. Environment Variables
+
+| Var | Required | Notes |
+|-----|----------|-------|
+| `JWT_SECRET` | **yes** | HS256 secret. No fallback — process exits if missing. |
+| `HWS_PORT` | no | overrides `config.json` port (default 8085). |
+| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` | no | defaults to pgdk/5432/dev/vatanampareyetanameyiran/bourse. |
+| `HWS_HEALTH_MAX_STALE_DAYS` | no | default 7. |
 
 | Var | Default | Purpose |
 |-----|---------|---------|
@@ -388,6 +409,8 @@ let previous = data.global_count.fetch_add(3, Ordering::SeqCst);
 Adds **3** per request, not 1. Almost certainly a bug from earlier experimentation. Harmless because the counter isn't used for anything real.
 
 ### 9.2 New DB connection per request
+
+> Mitigated 2026-09-30 by the 24h response cache — first request still opens 47 connections, subsequent requests within TTL do zero queries.
 Every call to `get_client()` opens a fresh TCP connection to Postgres — there's no pool. For a page that loads ~20 JSON keys, that's ~20 DB round-trips to open connections. Under load this could exhaust Postgres connections. Fix would be `deadpool-postgres` but nothing is broken today.
 
 ### 9.3 `SQL injection by table name`
@@ -396,7 +419,9 @@ client.query(&format!("SELECT * FROM {}", table_name), &[])
 ```
 `table_name` comes from a hardcoded array, so it's not exploitable **as written**. But if anyone ever makes the class list configurable, this becomes a vulnerability. Do not accept table names from user input.
 
-### 9.4 Self-signed cert is bound to `m.eepaco.ir`
+### 9.4 (removed) Self-signed cert
+
+This section is obsolete as of 2026-09-30. TLS was removed; the API is HTTP-only on the internal Docker network.
 The cert in the repo (`cert.pem`/`key.pem`) has `CN = m.eepaco.ir`. On any other host, browsers will reject the certificate. Options:
 - Regenerate for the new hostname
 - Terminate TLS at a reverse proxy (Caddy) and run HWS on plain HTTP behind it

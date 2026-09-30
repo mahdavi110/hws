@@ -5,13 +5,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tehran Stock History</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/history/styles.css">
     <!-- Chart.js Library -->
-    <script src="chart.js"></script>
+    <script src="/history/chart.js"></script>
     <!-- Chart.js Date Adapter -->
-    <script src="chartjs-adapter-date-fns.bundle.min.js">
+    <script src="/history/chartjs-adapter-date-fns.bundle.min.js">
     </script>
-    <script type="module" src="optimizedGaussianSmoother.js"></script>
+    <script type="module" src="/history/optimizedGaussianSmoother.js"></script>
 
 </head>
 
@@ -52,7 +52,7 @@
     </div>
 
     <script type="module">
-        import { smoothGaussian } from './optimizedGaussianSmoother.js';
+        import { smoothGaussian } from '/history/optimizedGaussianSmoother.js';
 
         let combinedDatasets = []; // Stores all dataset info (original/smoothed data)
         let combinedChart = null; // Reference to the combined chart instance
@@ -639,12 +639,18 @@
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-                const response = await fetch('../getAllCumulatives', {
+                const response = await fetch('/history/getAllCumulatives', {
                     signal: controller.signal,
                     headers: {
-                        'Accept': 'application/json'
+                        'Accept': 'application/json',
+                        'Authorization': 'Bearer ' + (localStorage.getItem('brx_token') || '')
                     }
                 });
+
+                if (response.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
 
                 clearTimeout(timeoutId);
 

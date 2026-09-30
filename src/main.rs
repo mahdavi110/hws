@@ -4,7 +4,6 @@ use actix_web::{
     get, middleware::Logger, web, App, HttpMessage, HttpRequest, HttpResponse, HttpServer,
 };
 use chrono::{NaiveDate, Utc};
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -17,6 +16,7 @@ use std::{
         Arc,
     },
     time::Duration,
+    time::Instant,
 };
 use tokio_postgres::{Error, NoTls, Row};
 
@@ -48,6 +48,9 @@ fn build_conn_str() -> String {
     let db = env::var("PGDATABASE").unwrap_or_else(|_| "bourse".to_string());
     format!("host={} port={} user={} password={} dbname={}", host, port, user, password, db)
 }
+
+static CUM_CACHE: tokio::sync::RwLock<Option<(std::time::Instant, String)>> = tokio::sync::RwLock::const_new(None);
+const CUM_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 async fn get_client() -> Result<tokio_postgres::Client, Error> {
     let conn_str = build_conn_str();
@@ -246,8 +249,20 @@ async fn healthz() -> HttpResponse {
     }))
 }
 
-#[get("/getAllCumulatives")]
-async fn get_all_cumulatives() -> HttpResponse {
+#[get("/history/getAllCumulatives")]
+async fn get_all_cumulatives(req: actix_web::HttpRequest) -> HttpResponse {
+    if validate_jwt(&req).is_err() {
+        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}));
+    }
+
+    {
+        let cache = CUM_CACHE.read().await;
+        if let Some((cached_at, body)) = cache.as_ref() {
+            if cached_at.elapsed() < CUM_CACHE_TTL {
+                return HttpResponse::Ok().content_type("application/json").body(body.clone());
+            }
+        }
+    }
     let classes = [
         "saham",
         "s_saham",
@@ -388,7 +403,12 @@ async fn get_all_cumulatives() -> HttpResponse {
         all_data.insert("shakhes_dollar_ratio".into(), json!(null));
     }
 
-    HttpResponse::Ok().json(all_data)
+    let body = serde_json::to_string(&all_data).unwrap_or_else(|_| "{}".to_string());
+    {
+        let mut cache = CUM_CACHE.write().await;
+        *cache = Some((std::time::Instant::now(), body.clone()));
+    }
+    HttpResponse::Ok().content_type("application/json").body(body)
 }
 
 async fn fetch_stock_data(table_name: String) -> Result<Vec<Value>, Error> {
@@ -572,6 +592,40 @@ fn vrow_to_json(row: &Row) -> serde_json::Value {
 //     })
 // }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct Claims {
+    pub sub: i32,
+    pub phone_number: String,
+    pub username: String,
+    pub exp: usize,
+}
+
+fn validate_jwt(req: &actix_web::HttpRequest) -> Result<Claims, ()> {
+    let secret = std::env::var("JWT_SECRET").map_err(|_| ())?;
+    let auth = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or(())?;
+    let token = auth.strip_prefix("Bearer ").ok_or(())?;
+    let data = jsonwebtoken::decode::<Claims>(
+        token,
+        &jsonwebtoken::DecodingKey::from_secret(secret.as_bytes()),
+        &jsonwebtoken::Validation::default(),
+    )
+    .map_err(|_| ())?;
+    Ok(data.claims)
+}
+
+#[get("/history")]
+async fn serve_history(req: actix_web::HttpRequest) -> HttpResponse {
+    match actix_files::NamedFile::open_async("htmls/cumchart.html").await {
+        Ok(f) => f.into_response(&req),
+        Err(e) => HttpResponse::InternalServerError()
+            .body(format!("Failed to read cumchart.html: {}", e)),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // --- شروع تغییرات ---
@@ -594,11 +648,6 @@ async fn main() -> std::io::Result<()> {
     // --- پایان تغییرات ---
 
     // Initialize SSL/TLS configuration
-    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-    builder
-        .set_private_key_file("key.pem", SslFiletype::PEM)
-        .unwrap();
-    builder.set_certificate_chain_file("cert.pem").unwrap();
 
     HttpServer::new(|| {
         let cors = Cors::default()
@@ -621,12 +670,14 @@ async fn main() -> std::io::Result<()> {
                     .use_etag(true)
                     .use_last_modified(true),
             )
-            .service(kindex)
+            
             .service(healthz)
-            .service(get_all_cumulatives) // Add the new route
+            .service(serve_history)
+            .service(get_all_cumulatives)
+            .service(Files::new("/history", "htmls"))
             .route("/ok", web::to(HttpResponse::Ok))
     })
-    .bind_openssl(address, builder)? // استفاده از آدرس داینامیک
+    .bind(address)?
     .keep_alive(Duration::from_secs(75))
     .shutdown_timeout(5)
     .run()
